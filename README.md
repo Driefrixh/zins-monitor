@@ -2,13 +2,13 @@
 
 Tägliches Update zur Zinsentwicklung — ohne Server, ohne laufende Kosten.
 
-- **GitHub Action** holt werktäglich die Zinsstrukturkurve der EZB, schreibt sie ins Repo und schickt eine Telegram-Nachricht.
+- **GitHub Action** holt werktäglich die Zinsstrukturkurve der EZB, schreibt sie ins Repo und schickt eine Push-Nachricht über ntfy.
 - **Scriptable-Widget** liest dieselben Daten und zeigt sie auf dem iPhone-Homescreen.
 
 ```
 zins-monitor/
 ├── .github/workflows/zins-update.yml   Cron-Job (werktags 17:10 MESZ)
-├── scripts/fetch_rates.py              Abruf, Auswertung, Telegram
+├── scripts/fetch_rates.py              Abruf, Auswertung, ntfy-Push  
 ├── scriptable/ZinsWidget.js            iOS-Widget
 └── data/                               wird automatisch befüllt
     ├── latest.json                     aktuelle Werte + Sparkline
@@ -26,7 +26,8 @@ kostenlos, ohne API-Key, werktäglich aktualisiert.
 Gemeldet werden: aktueller Stand, Veränderung zum Vortag sowie zu
 1 Woche / 1 Monat / 3 Monaten / 1 Jahr, jeweils in Basispunkten.
 Bei einer Tagesbewegung ab 10 Bp wird die Nachricht als Alarm
-markiert und mit Ton zugestellt — sonst lautlos.
+mit Priorität 4 (Ton und Vibration) zugestellt — sonst mit
+Priorität 2, also leise in der Mitteilungszentrale.
 
 ## Einrichtung
 
@@ -41,28 +42,38 @@ Anschließend unter **Settings → Actions → General → Workflow permissions*
 die Option *Read and write permissions* aktivieren, damit der Job die
 Daten zurück ins Repo committen darf.
 
-### 2. Telegram-Bot
+### 2. ntfy einrichten
 
-1. In Telegram **@BotFather** anschreiben, `/newbot`, Namen vergeben.
-   Der Bot-Token sieht aus wie `123456789:AAH...`.
-2. Den neuen Bot anschreiben (irgendeine Nachricht), damit er antworten darf.
-3. Chat-ID ermitteln: `https://api.telegram.org/bot<TOKEN>/getUpdates`
-   im Browser öffnen und `"chat":{"id": ...}` ablesen.
-   Alternativ **@userinfobot** anschreiben.
+ntfy braucht keinen Account. Du denkst dir einen geheimen Themennamen
+aus — er ist gleichzeitig Adresse und Passwort, also **nicht** `zinsen`,
+sondern etwas Unratbares wie `zins-d4k9x2mq-7fp`.
 
-Beides unter **Settings → Secrets and variables → Actions → New repository
-secret** hinterlegen:
+1. App **ntfy** aus dem App Store laden und öffnen.
+2. Auf **+** tippen, den Themennamen exakt eintragen, **Subscribe**.
+   Beim ersten Mal Benachrichtigungen erlauben.
+3. Im Repo unter **Settings → Secrets and variables → Actions →
+   New repository secret** anlegen:
 
-| Name               | Wert                |
-|--------------------|---------------------|
-| `TELEGRAM_TOKEN`   | der Bot-Token       |
-| `TELEGRAM_CHAT_ID` | die eigene Chat-ID  |
+| Name         | Wert                    |
+|--------------|-------------------------|
+| `NTFY_TOPIC` | dein Themenname         |
+
+Optional, nur bei eigenem Server oder reserviertem Topic:
+`NTFY_SERVER` (Standard `https://ntfy.sh`) und `NTFY_TOKEN`.
+
+Zum Testen ohne GitHub genügt ein Terminal-Befehl:
+
+```bash
+curl -d "Test" https://ntfy.sh/dein-themenname
+```
+
+Kommt die Meldung auf dem iPhone an, ist alles richtig eingerichtet.
 
 ### 3. Erster Lauf
 
 Unter **Actions → Zins-Update → Run workflow** manuell starten.
 Danach sollte `data/latest.json` im Repo liegen und die erste Nachricht
-im Telegram-Chat sein.
+auf dem iPhone angekommen sein.
 
 ### 4. Widget
 
@@ -104,5 +115,5 @@ Rot = Zinsen gestiegen, Grün = gefallen.
 python3 scripts/fetch_rates.py
 ```
 
-Ohne gesetzte Umgebungsvariablen `TELEGRAM_TOKEN` / `TELEGRAM_CHAT_ID`
-wird die Nachricht nur auf der Konsole ausgegeben.
+Ohne gesetzte Umgebungsvariable `NTFY_TOPIC` wird die Nachricht nur
+auf der Konsole ausgegeben — praktisch zum Testen der Formatierung.
