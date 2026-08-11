@@ -10,7 +10,7 @@ verschiedene Zeitraeume und schreibt:
     data/history.csv   -> langfristige Zeitreihe
     data/state.json    -> merkt sich den zuletzt gemeldeten Handelstag
 
-Optional wird eine Telegram-Nachricht verschickt.
+Optional wird eine Push-Nachricht ueber ntfy verschickt.
 Benoetigt keinerlei externe Pakete - nur Python-Standardbibliothek.
 """
 
@@ -234,72 +234,85 @@ def signed_bp(bp: float) -> str:
     return f"{sign}{de(abs(bp), 1)} Bp"
 
 
-def build_message(payload: dict) -> tuple[str, bool]:
+def build_message(payload: dict) -> tuple[str, str, bool]:
+    """Liefert (Titel, Nachrichtentext, Alarm-Flag) als reinen Text."""
     lead = payload["series"][payload["lead"]]
     day = datetime.strptime(payload["date"], "%Y-%m-%d").strftime("%d.%m.%Y")
     d1 = lead["deltas"].get("1T", 0.0)
     is_alert = abs(d1) >= ALERT_BP
 
-    lines = []
+    title = f"{arrow(d1)} 10J: {de(lead['value'])} %  ({signed_bp(d1)})"
     if is_alert:
-        lines.append("<b>\u26a0\ufe0f Deutliche Zinsbewegung</b>")
-    lines.append(f"<b>Renditen AAA-Staatsanleihen</b> \u00b7 {day}")
-    lines.append("")
-    lines.append(
-        f"{arrow(d1)} <b>10 Jahre: {de(lead['value'])} %</b>  ({signed_bp(d1)})"
-    )
-    lines.append("")
+        title = "Deutliche Zinsbewegung \u00b7 " + title
+
+    lines = [f"Renditen AAA-Staatsanleihen \u00b7 {day}", ""]
 
     order = ["1W", "1M", "3M", "1J"]
-    parts = [f"{h}: {signed_bp(lead['deltas'][h])}"
+    parts = [f"{h} {signed_bp(lead['deltas'][h])}"
              for h in order if h in lead["deltas"]]
     if parts:
-        lines.append("Veraenderung 10J \u00b7 " + "  |  ".join(parts))
+        lines.append("10 Jahre: " + "   ".join(parts))
+        lines.append("")
 
-    lines.append("")
     for sid, info in payload["series"].items():
         if sid == payload["lead"]:
             continue
         bp = info["deltas"].get("1T", 0.0)
         lines.append(
-            f"<code>{info['label']:>9}</code>  {de(info['value'])} %  "
-            f"({signed_bp(bp)})"
+            f"{info['label']:>9}   {de(info['value'])} %   ({signed_bp(bp)})"
         )
 
     if "spread_10y_2y" in payload:
         lines.append("")
         lines.append(f"Spread 10J\u22122J: {de(payload['spread_10y_2y'])} Pp")
 
-    return "\n".join(lines), is_alert
+    return title, "\n".join(lines), is_alert
 
 
-def send_telegram(text: str, silent: bool) -> None:
-    token = os.environ.get("TELEGRAM_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
-    if not token or not chat_id:
-        print("Kein Telegram-Token/Chat konfiguriert - Nachricht nur in der Konsole:")
-        print(text)
+def send_ntfy(title: str, text: str, payload: dict, is_alert: bool) -> None:
+    topic = os.environ.get("NTFY_TOPIC")
+    # Nicht gesetzte GitHub-Secrets kommen als leerer String an, nicht als None
+    server = (os.environ.get("NTFY_SERVER") or "https://ntfy.sh").rstrip("/")
+
+    if not topic:
+        print("Kein NTFY_TOPIC gesetzt - Nachricht nur in der Konsole:")
+        print(f"{title}\n{text}")
         return
 
-    body = urllib.parse.urlencode({
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": "true",
-        "disable_notification": "true" if silent else "false",
-    }).encode()
+    lead = payload["series"][payload["lead"]]
+    d1 = lead["deltas"].get("1T", 0.0)
+    if is_alert:
+        tag = "warning"
+    elif d1 > 0.5:
+        tag = "chart_with_upwards_trend"
+    elif d1 < -0.5:
+        tag = "chart_with_downwards_trend"
+    else:
+        tag = "left_right_arrow"
 
-    req = urllib.request.Request(
-        f"https://api.telegram.org/bot{token}/sendMessage",
-        data=body,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-    )
+    body = json.dumps({
+        "topic": topic,
+        "title": title,
+        "message": text,
+        # 2 = leise zustellen, 4 = mit Ton und Vibration
+        "priority": 4 if is_alert else 2,
+        "tags": [tag],
+        "click": "https://data.ecb.europa.eu/data/datasets/YC/"
+                 "YC.B.U2.EUR.4F.G_N_A.SV_C_YM.SR_10Y",
+    }, ensure_ascii=False).encode("utf-8")
+
+    headers = {"Content-Type": "application/json; charset=utf-8"}
+    token = os.environ.get("NTFY_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    req = urllib.request.Request(server + "/", data=body, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             resp.read()
-        print("Telegram-Nachricht verschickt.")
+        print("ntfy-Nachricht verschickt.")
     except Exception as exc:                      # noqa: BLE001
-        print(f"Telegram-Versand fehlgeschlagen: {exc}", file=sys.stderr)
+        print(f"ntfy-Versand fehlgeschlagen: {exc}", file=sys.stderr)
 
 
 # --------------------------------------------------------------------------
@@ -330,8 +343,8 @@ def main() -> None:
         print("Kein neuer Handelstag - keine Benachrichtigung.")
         return
 
-    text, is_alert = build_message(payload)
-    send_telegram(text, silent=not is_alert)
+    title, text, is_alert = build_message(payload)
+    send_ntfy(title, text, payload, is_alert)
 
     state["last_notified"] = payload["date"]
     STATE_FILE.write_text(
