@@ -37,8 +37,11 @@ jobs:
 
       - name: Zinsen abrufen und Nachricht schicken
         env:
-          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # Geheimer Themenname, z. B. zins-d4k9x2mq
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          # Nur noetig bei eigenem ntfy-Server oder reserviertem Topic
+          NTFY_SERVER: ${{ secrets.NTFY_SERVER }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           # Ab dieser Tagesveraenderung wird die Nachricht als Alarm
           # markiert und mit Ton zugestellt (in Basispunkten).
           ALERT_BP: "10"
